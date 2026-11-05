@@ -69,7 +69,7 @@ class UpdatesViewModel(
         viewModelScope.launch {
             repository.observeLocalUpdates().collect { updates ->
                 _uiState.update { it.copy(updates = updates) }
-                if (updates.any { it.isAvailableOnline }) {
+                if (updates.any { it.downloadId != Update.LOCAL_ID && it.downloadUrl != null }) {
                     loadChangelog()
                 }
             }
@@ -100,7 +100,9 @@ class UpdatesViewModel(
                     appStateRepository.setLastCheckedTimestamp(fetchedAt)
                 }
                 _uiState.update { it.copy(isCheckingForUpdates = false) }
-                if (_uiState.value.updates.any { it.isAvailableOnline }) {
+                if (_uiState.value.updates.any {
+                    it.downloadId != Update.LOCAL_ID && it.downloadUrl != null
+                }) {
                     loadChangelog()
                 }
             } catch (e: Exception) {
