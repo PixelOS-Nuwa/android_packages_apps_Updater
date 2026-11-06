@@ -34,6 +34,7 @@ class PixelOsFeedTest(unittest.TestCase):
             "pre-device": "nuwa",
             "post-timestamp": "1781858358",
             "post-build": "Xiaomi/nuwa/nuwa:17/target",
+            "post-build-incremental": "1781858358",
             "post-security-patch-level": "2026-06-01",
             "post-sdk-level": "36",
             "ota-property-files": (
@@ -127,6 +128,7 @@ class PixelOsFeedTest(unittest.TestCase):
         incremental = self.create_ota(
             {
                 "pre-build": "Xiaomi/nuwa/nuwa:17/source",
+                "pre-build-incremental": "1781850000",
                 "ota-property-files": (
                     "payload_metadata.bin:0:1,payload.bin:1:2,"
                     "payload_properties.txt:3:1"
@@ -156,6 +158,7 @@ class PixelOsFeedTest(unittest.TestCase):
         incremental = self.create_ota(
             {
                 "pre-build": "Xiaomi/nuwa/nuwa:17/source",
+                "pre-build-incremental": "1781850000",
                 "post-build": "Xiaomi/nuwa/nuwa:17/other-target",
             },
             filename="PixelOS_nuwa-incremental-20260619.zip",
@@ -177,6 +180,7 @@ class PixelOsFeedTest(unittest.TestCase):
         incremental = self.create_ota(
             {
                 "pre-build": "Xiaomi/nuwa/nuwa:17/source",
+                "pre-build-incremental": "1781850000",
                 "post-security-patch-level": "2026-07-01",
             },
             filename="PixelOS_nuwa-incremental-20260619.zip",
@@ -193,6 +197,62 @@ class PixelOsFeedTest(unittest.TestCase):
         )
 
         self.assertEqual("2026-07-01", result[0]["incremental"][0]["os_patch_level"])
+
+    def test_incremental_allows_fixed_fingerprint_with_distinct_versions(self) -> None:
+        full = self.create_ota(padding=2048)
+        incremental = self.create_ota(
+            {
+                "pre-build": "Xiaomi/nuwa/nuwa:17/target",
+                "pre-build-incremental": "1781850000",
+            },
+            filename="PixelOS_nuwa-incremental-20260619.zip",
+        )
+        feed = pixelos_feed.build_ota_feed(
+            full, "https://downloads.pixelos.net/nuwa/full.zip", "17.0"
+        )
+
+        result = pixelos_feed.add_incremental_to_feed(
+            feed, incremental, full, "https://downloads.pixelos.net/nuwa/incremental.zip"
+        )
+
+        self.assertEqual(incremental.name, result[0]["incremental"][0]["filename"])
+
+    def test_incremental_rejects_identical_versions(self) -> None:
+        full = self.create_ota(padding=2048)
+        incremental = self.create_ota(
+            {
+                "pre-build": "Xiaomi/nuwa/nuwa:17/target",
+                "pre-build-incremental": "1781858358",
+            },
+            filename="PixelOS_nuwa-incremental-20260619.zip",
+        )
+        feed = pixelos_feed.build_ota_feed(
+            full, "https://downloads.pixelos.net/nuwa/full.zip", "17.0"
+        )
+
+        with self.assertRaisesRegex(pixelos_feed.ValidationError, "source and target builds are identical"):
+            pixelos_feed.add_incremental_to_feed(
+                feed, incremental, full, "https://downloads.pixelos.net/nuwa/incremental.zip"
+            )
+
+    def test_incremental_rejects_wrong_target_version(self) -> None:
+        full = self.create_ota(padding=2048)
+        incremental = self.create_ota(
+            {
+                "pre-build": "Xiaomi/nuwa/nuwa:17/target",
+                "pre-build-incremental": "1781850000",
+                "post-build-incremental": "1781858359",
+            },
+            filename="PixelOS_nuwa-incremental-20260619.zip",
+        )
+        feed = pixelos_feed.build_ota_feed(
+            full, "https://downloads.pixelos.net/nuwa/full.zip", "17.0"
+        )
+
+        with self.assertRaisesRegex(pixelos_feed.ValidationError, "target version does not match"):
+            pixelos_feed.add_incremental_to_feed(
+                feed, incremental, full, "https://downloads.pixelos.net/nuwa/incremental.zip"
+            )
 
     def test_incremental_feed_requires_payload_ranges(self) -> None:
         feed = pixelos_feed.build_ota_feed(

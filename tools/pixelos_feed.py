@@ -231,13 +231,18 @@ def add_incremental_to_feed(
         "Incremental timestamp does not match full OTA",
     )
     _require(
+        _metadata_integer(incremental_metadata, "post-build-incremental")
+        == _metadata_integer(full_metadata, "post-build-incremental"),
+        "Incremental target version does not match full OTA",
+    )
+    _require(
         _metadata_value(incremental_metadata, "pre-device") == "nuwa",
         "Incremental OTA is not built for nuwa",
     )
     _require("pre-build" in incremental_metadata, "Incremental OTA is missing pre-build metadata")
     _require(
-        _metadata_value(incremental_metadata, "pre-build")
-        != _metadata_value(incremental_metadata, "post-build"),
+        _metadata_integer(incremental_metadata, "pre-build-incremental")
+        != _metadata_integer(incremental_metadata, "post-build-incremental"),
         "Incremental source and target builds are identical",
     )
 
