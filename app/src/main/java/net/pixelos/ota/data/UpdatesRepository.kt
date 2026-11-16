@@ -7,7 +7,6 @@ package net.pixelos.ota.data
 
 import android.content.Context
 import android.os.Build
-import android.os.UpdateEngine
 import android.ota.nano.OtaPackageMetadata.OtaMetadata
 import android.util.Log
 import androidx.preference.PreferenceManager
@@ -24,11 +23,9 @@ import net.pixelos.ota.data.source.network.toUpdate
 import net.pixelos.ota.deviceinfo.DeviceInfoUtils
 import net.pixelos.ota.download.SingleRangeHttpFetcher
 import net.pixelos.ota.misc.Constants
-import net.pixelos.ota.misc.Utils
 import net.pixelos.ota.notifications.NotificationHelper
 import net.pixelos.ota.util.NetworkMonitor
 import org.json.JSONObject
-import java.io.File
 import java.io.IOException
 
 private const val TAG = "UpdatesRepository"
@@ -57,7 +54,7 @@ class UpdatesRepository(
 
         val networkUpdates = withContext(Dispatchers.IO) {
             val network = networkDataSource.fetchUpdates()
-            val applicable = network.filter { isIncrementalApplicable(it) }
+            val applicable = network.filter { isIncrementalForCurrentBuild(it) }
             persistIncrementalLinks(applicable)
             network.flatMap { update ->
                 val incremental = update.toIncrementalUpdate().takeIf { update in applicable }
@@ -132,31 +129,32 @@ class UpdatesRepository(
     }
 
     /**
-     * Checks that the incremental applies to the running build: update_engine verifies A/B
-     * payloads, and non-A/B packages must list this build as their source.
+     * Checks whether the incremental was built for the running source version. A/B partition
+     * compatibility is checked by update_engine when the payload is applied.
      */
-    private fun isIncrementalApplicable(update: NetworkUpdate): Boolean {
+    private fun isIncrementalForCurrentBuild(update: NetworkUpdate): Boolean {
         val delta = update.incremental?.firstOrNull() ?: return false
         val ranges = delta.otaPropertyFiles?.parsePackageFileRanges(delta.size) ?: return false
         val fetcher = SingleRangeHttpFetcher(delta.url)
         return try {
             if (DeviceInfoUtils.isABDevice) {
-                val range = ranges[Constants.AB_PAYLOAD_METADATA_PATH] ?: return false
-                val metadata = File(Utils.getDownloadPath(context), "${delta.sha256}.metadata")
-                try {
-                    metadata.writeBytes(fetcher.download(range.offset, range.size))
-                    metadata.setReadable(true, false)
-                    UpdateEngine().verifyPayloadMetadata(metadata.path)
-                } finally {
-                    metadata.delete()
+                val range = ranges[Constants.OTA_METADATA_PATH] ?: return false
+                val metadata = fetcher.download(range.offset, range.size)
+                    .decodeToString()
+                val sourceIncremental = metadata.preBuildIncremental() ?: return false
+                val matchesCurrentBuild = sourceIncremental == Build.VERSION.INCREMENTAL
+                if (!matchesCurrentBuild) {
+                    Log.d(TAG, "${delta.filename} targets source $sourceIncremental, " +
+                            "current build is ${Build.VERSION.INCREMENTAL}")
                 }
+                matchesCurrentBuild
             } else {
                 val range = ranges[Constants.OTA_METADATA_PB_PATH] ?: return false
                 val metadata = OtaMetadata.parseFrom(fetcher.download(range.offset, range.size))
                 Build.FINGERPRINT in metadata.precondition.build
             }
         } catch (e: Exception) {
-            Log.w(TAG, "${delta.filename} can't be applied to this build", e)
+            Log.w(TAG, "Failed to check source build for ${delta.filename}", e)
             false
         }
     }
@@ -178,3 +176,9 @@ class UpdatesRepository(
         return true
     }
 }
+
+private fun String.preBuildIncremental(): String? =
+    lineSequence()
+        .firstOrNull { it.startsWith("pre-build-incremental=") }
+        ?.substringAfter('=')
+        ?.trim()
